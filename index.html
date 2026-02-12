@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>AI วิเคราะห์ทรงหน้า</title>
+    <style>
+        :root { --primary: #6366f1; --secondary: #ec4899; }
+        body { font-family: 'Kanit', sans-serif; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; }
+        .main-card { background: white; padding: 2rem; border-radius: 30px; width: 100%; max-width: 450px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+        #webcam-container { width: 300px; height: 300px; margin: 0 auto 20px; border-radius: 20px; overflow: hidden; background: #000; border: 5px solid #fff; }
+        canvas, #img-preview { width: 100%; height: 100%; object-fit: cover; }
+        .btn-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        .btn-start, .btn-upload { border: none; padding: 15px; border-radius: 15px; cursor: pointer; flex: 1; color: white; font-weight: 600; font-size: 1rem; }
+        .btn-start { background: var(--primary); }
+        .btn-upload { background: #10b981; }
+        #advice-card { margin-top: 20px; padding: 15px; border-radius: 20px; background: #fdf2f8; border: 2px solid #fbcfe8; display: none; }
+        #glasses-img { width: 100%; height: auto; border-radius: 10px; margin-top: 10px; }
+        
+        /* สไตล์หลอดพลังงานตามรูปภาพ */
+        .prediction-item { background: white; padding: 15px; border-radius: 15px; margin-top: 10px; text-align: left; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .progress-container { background-color: #f0f2f5; border-radius: 20px; height: 8px; width: 100%; overflow: hidden; margin-top: 8px; }
+        .progress-fill { height: 100%; width: 0%; background-color: #5c67f2; border-radius: 20px; transition: width 0.6s ease-out; }
+    </style>
+</head>
+<body>
+
+<div class="main-card">
+    <h2>AI วิเคราะห์รูปหน้า</h2>
+    <div id="webcam-container"><img id="img-preview" style="display:none;"></div>
+    <div class="btn-group">
+        <button class="btn-start" onclick="init()">เปิดกล้อง</button>
+        <label class="btn-upload">อัปโหลดรูป<input type="file" accept="image/*" style="display:none" onchange="handleUpload(this)"></label>
+    </div>
+    <div id="advice-card">
+        <strong style="color: #be185d;">✨ ทรงแว่นที่แนะนำ:</strong>
+        <img id="glasses-img" src="" alt="คำแนะนำ">
+        <p id="advice-text" style="font-size: 0.9rem; color: #831843;"></p>
+    </div>
+    <div id="label-container"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+<script>
+    const URL = "https://teachablemachine.withgoogle.com/models/fe5kxP7W6/";
+    let model, webcam, labelContainer, maxPredictions;
+
+    const glassesImages = {
+        "oval": "https://i.postimg.cc/85DWCtDz/oval.png", 
+        "round": "https://i.postimg.cc/X7hC5V3m/round.png", 
+        "square": "https://i.postimg.cc/q7H6mjNG/square.png", 
+        "heart": "https://i.postimg.cc/wv0tjz0w/heart.png", 
+        "oblong": "https://i.postimg.cc/Gh9D9B0y/oblong.png" 
+    };
+
+    async function loadModel() {
+        model = await tmImage.load(URL + "model.json", URL + "metadata.json");
+    }
+    loadModel();
+
+    async function init() {
+        webcam = new tmImage.Webcam(300, 300, true);
+        await webcam.setup();
+        await webcam.play();
+        document.getElementById("webcam-container").innerHTML = "";
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        loop();
+    }
+
+    async function loop() {
+        webcam.update();
+        await predict(webcam.canvas);
+        window.requestAnimationFrame(loop);
+    }
+
+    async function handleUpload(input) {
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = document.getElementById("img-preview");
+                img.src = e.target.result;
+                img.style.display = "block";
+                document.getElementById("webcam-container").innerHTML = "";
+                document.getElementById("webcam-container").appendChild(img);
+                img.onload = () => predict(img);
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+
+    async function predict(source) {
+        const prediction = await model.predict(source);
+        let best = { name: "", prob: 0 };
+        const labelContainer = document.getElementById("label-container");
+        labelContainer.innerHTML = "";
+
+        prediction.forEach(p => {
+            const classNameLC = p.className.toLowerCase();
+            if (p.probability > best.prob) {
+                best = { name: classNameLC, prob: p.probability };
+            }
+
+            const probPercent = (p.probability * 100).toFixed(0);
+            const div = document.createElement("div");
+            div.className = "prediction-item";
+            div.innerHTML = `
+                <div style="display: flex; justify-content: space-between; font-weight:bold;">
+                    <span>${p.className}</span>
+                    <span>${probPercent}%</span>
+                </div>
+                <div class="progress-container">
+                    <div class="progress-fill" style="width: ${probPercent}%"></div>
+                </div>
+            `;
+            labelContainer.appendChild(div);
+        });
+
+        const adviceCard = document.getElementById("advice-card");
+        if (best.prob > 0.5) {
+            adviceCard.style.display = "block";
+            const advice = {
+                "oval": "หน้ารูปไข่: ใส่ได้ทุกทรง! แต่ Rectangle จะช่วยให้หน้าดูคมชัดขึ้น",
+                "round": "หน้ากลม: แนะนำทรง Square หรือ Rectangle เพื่อเพิ่มมุมให้ใบหน้า",
+                "square": "หน้าเหลี่ยม: แนะนำทรง Round หรือ Thin frame เพื่อช่วยลดความแข็งของกราม",
+                "heart": "รูปหัวใจ: แนะนำทรง Wayfarer หรือ Cat-eye เพื่อปรับสมดุลหน้าผาก",
+                "oblong": "ทรงยาว: แนะนำทรง Round หรือ Oval เพื่อให้หน้าดูสั้นลง"
+            };
+            document.getElementById("glasses-img").src = glassesImages[best.name] || "";
+            document.getElementById("advice-text").innerText = advice[best.name] || "กำลังวิเคราะห์...";
+        } else {
+            adviceCard.style.display = "none";
+        }
+    }
+</script>
+</body>
+</html>
